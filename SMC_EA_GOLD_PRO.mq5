@@ -4,19 +4,41 @@
 //|                                 Enhanced Risk Management Edition  |
 //+------------------------------------------------------------------+
 #property copyright "Gold Trading EA Pro V3"
-#property version   "3.00"
+#property version   "4.00"
 #property strict
 
+// Trading Style Modes
+enum ENUM_TRADING_STYLE {
+    STYLE_SCALPING,     // Scalping (M5-M15, ทำกำไรเร็ว)
+    STYLE_SWING,        // Swing (H1-H4, เทรดระยะกลาง)
+    STYLE_POSITION      // Position (H4-D1, เทรดระยะยาว)
+};
+
+// Stop Loss Modes
+enum ENUM_SL_MODE {
+    SL_FIXED,           // ระยะคงที่
+    SL_ATR,             // ตาม ATR
+    SL_SWING,           // ตาม Swing High/Low
+    SL_SMART,           // Smart SL (รวมหลายวิธี)
+    SL_ADAPTIVE         // Adaptive SL (ปรับตามสภาพตลาดอัตโนมัติ)
+};
+
 // Input Parameters
+input group "=== Trading Style & Strategy ==="
+input ENUM_TRADING_STYLE TradingStyle = STYLE_SWING;  // สไตล์การเทรด
+input bool AggressiveMode = false;      // โหมดเชิงรุก (เข้าเทรดมากขึ้น)
+input bool AllowMultiplePositions = false; // อนุญาตหลายออเดอร์ในทิศทางเดียว
+input int MaxPositions = 3;             // จำนวนออเดอร์สูงสุดพร้อมกัน
+
 input group "=== Risk Management Enhanced ==="
 input double LotSize = 0.01;                // ขนาด Lot
 input double RiskPercent = 1.0;             // % ความเสี่ยงต่อการเทรด
 input bool UseAutoLot = true;               // คำนวณ Lot อัตโนมัติ (แนะนำให้เปิด)
-input ENUM_SL_MODE SL_Mode = SL_ATR;        // โหมด Stop Loss
+input ENUM_SL_MODE SL_Mode = SL_ADAPTIVE;   // โหมด Stop Loss
 input double StopLoss_Fixed = 800;          // Stop Loss แบบคงที่ (points)
 input double ATR_Multiplier = 2.5;         // ATR Multiplier สำหรับ SL
-input double SL_MinDistance = 400;          // SL ขั้นต่ำ (points)
-input double SL_MaxDistance = 1500;        // SL สูงสุด (points)
+input double SL_MinDistance = 300;          // SL ขั้นต่ำ (points) - ลดลงเพื่อความยืดหยุ่น
+input double SL_MaxDistance = 3000;        // SL สูงสุด (points) - เพิ่มขึ้นสำหรับ long-term
 input double RiskRewardRatio = 2.0;         // Risk:Reward Ratio
 input bool UseTrailingStop = true;          // ใช้ Trailing Stop
 input double TrailingStop_ATR = 1.5;        // Trailing Stop (ATR multiplier)
@@ -27,14 +49,6 @@ input double BreakEvenProfit = 100;         // BE Profit (points)
 input bool UsePartialClose = true;          // ใช้ Partial Close
 input double PartialClose_ATR = 1.5;        // Partial Close Trigger (ATR)
 input double PartialClose_Percent = 50.0;   // % ที่จะปิด
-
-// Stop Loss Modes
-enum ENUM_SL_MODE {
-    SL_FIXED,           // ระยะคงที่
-    SL_ATR,             // ตาม ATR
-    SL_SWING,           // ตาม Swing High/Low
-    SL_SMART            // Smart SL (รวมหลายวิธี)
-};
 
 input group "=== OBV Settings Enhanced ==="
 input int OBV_Period = 20;                  // OBV MA Period
@@ -96,7 +110,19 @@ input double MinVolumeMultiplier = 1.2;     // ปริมาณขั้นต
 input bool UseMomentumFilter = true;        // ใช้ Momentum Filter
 input int MomentumPeriod = 14;              // Momentum Period
 input bool UseConfluenceFilter = true;      // ใช้ Confluence Filter
-input int MinConfluenceSignals = 3;         // สัญญาณขั้นต่ำที่ต้องมาบรรจบ
+input int MinConfluenceSignals = 2;         // สัญญาณขั้นต่ำที่ต้องมาบรรจบ (ลดจาก 3 เป็น 2)
+
+input group "=== Day Filter ==="
+input bool TradeOnMonday = true;            // เทรดวันจันทร์
+input bool TradeOnTuesday = true;           // เทรดวันอังคาร
+input bool TradeOnWednesday = true;         // เทรดวันพุธ
+input bool TradeOnThursday = true;          // เทรดวันพฤหัสบดี
+input bool TradeOnFriday = true;            // เทรดวันศุกร์
+
+input group "=== Alert Settings ==="
+input bool EnableAlerts = true;             // เปิดการแจ้งเตือน
+input bool EnablePushNotification = false;  // ส่ง Push Notification
+input bool EnableEmailAlert = false;        // ส่ง Email Alert
 
 input group "=== Dashboard Settings Enhanced ==="
 input bool ShowDashboard = true;            // แสดง Dashboard
@@ -222,12 +248,17 @@ int OnInit()
         CreateEnhancedDashboard();
     
     Print("═══════════════════════════════════════");
-    Print("Gold SMC EA Pro V3.0 Initialized");
-    Print("Enhanced Risk Management Edition");
+    Print("Gold SMC EA Pro V4.0 Initialized");
+    Print("Enhanced Risk Management & Multi-Style Edition");
     Print("Symbol: ", _Symbol);
     Print("Timeframe: ", EnumToString(PERIOD_CURRENT));
     Print("SL Mode: ", EnumToString(SL_Mode));
+    Print("SL Range: ", SL_MinDistance, "-", SL_MaxDistance, " points");
+    Print("Min Confluence: ", MinConfluenceSignals, " signals");
     Print("═══════════════════════════════════════");
+    
+    // Apply trading style settings
+    ApplyTradingStyleSettings();
     
     return(INIT_SUCCEEDED);
 }
@@ -319,6 +350,10 @@ double CalculateStopLoss(bool isBuy, double entryPrice = 0)
             
         case SL_SMART:
             slDistance = CalculateSmartSL(isBuy, entryPrice);
+            break;
+            
+        case SL_ADAPTIVE:
+            slDistance = CalculateAdaptiveSL(isBuy, entryPrice);
             break;
     }
     
@@ -507,23 +542,45 @@ int GetEnhancedTradeSignal()
     int bullishCount = CountSignals(bullish);
     int bearishCount = CountSignals(bearish);
     
+    // Adjust required signals based on mode
+    int requiredSignals = MinConfluenceSignals;
+    
+    if(AggressiveMode)
+    {
+        // In aggressive mode, require fewer signals
+        requiredSignals = MathMax(1, MinConfluenceSignals - 1);
+        Print("🔥 Aggressive Mode: Required signals = ", requiredSignals);
+    }
+    
     // Decision logic
     if(UseConfluenceFilter)
     {
-        if(bullishCount >= MinConfluenceSignals && bullishCount > bearishCount)
+        if(bullishCount >= requiredSignals && bullishCount > bearishCount)
+        {
+            Print("✅ BUY Signal - Confluence: ", bullishCount, "/9 signals");
             return 1;
-        if(bearishCount >= MinConfluenceSignals && bearishCount > bullishCount)
+        }
+        if(bearishCount >= requiredSignals && bearishCount > bullishCount)
+        {
+            Print("✅ SELL Signal - Confluence: ", bearishCount, "/9 signals");
             return -1;
+        }
     }
     else
     {
         // Traditional logic with some confluence
         if(bullish.obvSignal && bullish.sessionSignal && 
-           (bullish.fvgSignal || bullish.obSignal) && bullishCount >= 3)
+           (bullish.fvgSignal || bullish.obSignal) && bullishCount >= requiredSignals)
+        {
+            Print("✅ BUY Signal - Traditional logic with ", bullishCount, " confirmations");
             return 1;
+        }
         if(bearish.obvSignal && bearish.sessionSignal && 
-           (bearish.fvgSignal || bearish.obSignal) && bearishCount >= 3)
+           (bearish.fvgSignal || bearish.obSignal) && bearishCount >= requiredSignals)
+        {
+            Print("✅ SELL Signal - Traditional logic with ", bearishCount, " confirmations");
             return -1;
+        }
     }
     
     return 0;
@@ -911,7 +968,7 @@ void OpenEnhancedBuy()
     request.tp = tp;
     request.deviation = 30;
     request.magic = 123456;
-    request.comment = StringFormat("SMC Buy V3 - SL:%.0f", slDistance/_Point);
+    request.comment = StringFormat("SMC Buy V4 - SL:%.0f", slDistance/_Point);
     
     if(!OrderSend(request, result))
     {
@@ -951,7 +1008,7 @@ void OpenEnhancedSell()
     request.tp = tp;
     request.deviation = 30;
     request.magic = 123456;
-    request.comment = StringFormat("SMC Sell V3 - SL:%.0f", slDistance/_Point);
+    request.comment = StringFormat("SMC Sell V4 - SL:%.0f", slDistance/_Point);
     
     if(!OrderSend(request, result))
     {
@@ -1014,9 +1071,9 @@ void CreateEnhancedDashboard()
     int lineHeight = Dashboard_FontSize + 3;
     
     // Title
-    CreateLabel("DASH_Title", Dashboard_X, y, "══════ GOLD SMC EA PRO V3.0 ══════", Dashboard_FontSize + 2, clrGold);
+    CreateLabel("DASH_Title", Dashboard_X, y, "══════ GOLD SMC EA PRO V4.0 ══════", Dashboard_FontSize + 2, clrGold);
     y += lineHeight * 2;
-    CreateLabel("DASH_Subtitle", Dashboard_X, y, "Enhanced Risk Management Edition", Dashboard_FontSize, clrYellow);
+    CreateLabel("DASH_Subtitle", Dashboard_X, y, "Multi-Style Trading Edition", Dashboard_FontSize, clrYellow);
     y += lineHeight * 2;
     
     // System Status
@@ -1119,7 +1176,10 @@ void UpdateEnhancedDashboard()
     
     // Session Info
     string sessionInfo = GetCurrentSessionInfo();
-    ObjectSetString(0, "DASH_SessionInfo", OBJPROP_TEXT, "Session: " + sessionInfo);
+    string styleInfo = EnumToString(TradingStyle);
+    if(AggressiveMode) styleInfo += " [AGGRESSIVE]";
+    ObjectSetString(0, "DASH_SessionInfo", OBJPROP_TEXT, 
+                   StringFormat("Style: %s | %s", styleInfo, sessionInfo));
     
     // Position Info
     int buyPos = CountOpenPositions(POSITION_TYPE_BUY);
@@ -1437,15 +1497,36 @@ void OnTick()
         {
             int signal = GetEnhancedTradeSignal();
             
-            if(signal == 1 && CountOpenPositions(POSITION_TYPE_BUY) == 0)
+            // Check position limits
+            int buyPositions = CountOpenPositions(POSITION_TYPE_BUY);
+            int sellPositions = CountOpenPositions(POSITION_TYPE_SELL);
+            int totalPositions = buyPositions + sellPositions;
+            
+            bool canOpenBuy = AllowMultiplePositions ? 
+                             (buyPositions < MaxPositions && totalPositions < MaxPositions) : 
+                             (buyPositions == 0);
+                             
+            bool canOpenSell = AllowMultiplePositions ? 
+                              (sellPositions < MaxPositions && totalPositions < MaxPositions) : 
+                              (sellPositions == 0);
+            
+            if(signal == 1 && canOpenBuy)
             {
                 OpenEnhancedBuy();
                 SendAlert("🟢 Enhanced Buy Signal Detected! 📈");
             }
-            else if(signal == -1 && CountOpenPositions(POSITION_TYPE_SELL) == 0)
+            else if(signal == -1 && canOpenSell)
             {
                 OpenEnhancedSell();
                 SendAlert("🔴 Enhanced Sell Signal Detected! 📉");
+            }
+            else if(signal == 1 && !canOpenBuy)
+            {
+                Print("⚠️ Buy signal ignored - Position limit reached (", buyPositions, "/", MaxPositions, ")");
+            }
+            else if(signal == -1 && !canOpenSell)
+            {
+                Print("⚠️ Sell signal ignored - Position limit reached (", sellPositions, "/", MaxPositions, ")");
             }
         }
     }
@@ -2033,7 +2114,7 @@ void SendAlert(string message)
 {
     if(!EnableAlerts) return;
     
-    string fullMessage = StringFormat("[GOLD SMC V3] %s - %s | %s", 
+    string fullMessage = StringFormat("[GOLD SMC V4] %s - %s | %s", 
                                      _Symbol, 
                                      TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES),
                                      message);
@@ -2054,7 +2135,7 @@ void SendAlert(string message)
     // Email Alert
     if(EnableEmailAlert)
     {
-        string emailSubject = "Gold SMC EA V3 - " + _Symbol + " Alert";
+        string emailSubject = "Gold SMC EA V4 - " + _Symbol + " Alert";
         string emailBody = fullMessage + "\n\n";
         emailBody += "Account: " + IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)) + "\n";
         emailBody += "Balance: $" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2) + "\n";
@@ -2200,8 +2281,9 @@ void OnDeinit(const int reason)
     
     // Print final statistics
     Print("═══════════════════════════════════════");
-    Print("Gold SMC EA Pro V3 Terminated");
+    Print("Gold SMC EA Pro V4.0 Terminated");
     Print("Reason: ", GetUninitReasonText(reason));
+    Print("Trading Style: ", EnumToString(TradingStyle));
     Print("Total Trades: ", stats.totalTrades);
     if(stats.totalTrades > 0)
     {
@@ -2228,6 +2310,246 @@ string GetUninitReasonText(int reason)
         case REASON_REMOVE: return "EA removed";
         case REASON_TEMPLATE: return "Template changed";
         default: return "Unknown reason";
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Check for New Bar                                                |
+//+------------------------------------------------------------------+
+bool IsNewBar()
+{
+    datetime currentBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
+    
+    if(currentBarTime != lastBarTime)
+    {
+        lastBarTime = currentBarTime;
+        return true;
+    }
+    
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Count Open Positions by Type                                     |
+//+------------------------------------------------------------------+
+int CountOpenPositions(ENUM_POSITION_TYPE type)
+{
+    int count = 0;
+    
+    for(int i = 0; i < PositionsTotal(); i++)
+    {
+        if(PositionSelectByTicket(PositionGetTicket(i)))
+        {
+            if(PositionGetString(POSITION_SYMBOL) == _Symbol && 
+               PositionGetInteger(POSITION_TYPE) == type)
+            {
+                count++;
+            }
+        }
+    }
+    
+    return count;
+}
+
+//+------------------------------------------------------------------+
+//| Create Dashboard Label                                           |
+//+------------------------------------------------------------------+
+void CreateLabel(string name, int x, int y, string text, int fontSize, color clr)
+{
+    if(ObjectFind(0, name) >= 0)
+        ObjectDelete(0, name);
+    
+    ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+    ObjectSetString(0, name, OBJPROP_TEXT, text);
+    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSize);
+    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+    ObjectSetString(0, name, OBJPROP_FONT, "Arial Bold");
+}
+
+//+------------------------------------------------------------------+
+//| Get Auto-Adjusted Parameters Based on Trading Style              |
+//+------------------------------------------------------------------+
+void ApplyTradingStyleSettings()
+{
+    switch(TradingStyle)
+    {
+        case STYLE_SCALPING:
+            // Scalping: Quick trades, tighter SL, more aggressive
+            Print("📊 Trading Style: SCALPING (M5-M15)");
+            Print("⚙️ Auto-adjusting parameters for scalping...");
+            
+            // Override some parameters for scalping
+            if(SL_Mode == SL_ADAPTIVE)
+            {
+                // Tighter stops for scalping
+                // This is done in CalculateAdaptiveSL function
+            }
+            break;
+            
+        case STYLE_SWING:
+            // Swing: Medium-term trades, balanced SL
+            Print("📊 Trading Style: SWING (H1-H4)");
+            Print("⚙️ Using balanced parameters for swing trading...");
+            break;
+            
+        case STYLE_POSITION:
+            // Position: Long-term trades, wider SL, more patient
+            Print("📊 Trading Style: POSITION (H4-D1)");
+            Print("⚙️ Auto-adjusting parameters for position trading...");
+            
+            // Wider stops for position trading
+            break;
+    }
+    
+    if(AggressiveMode)
+    {
+        Print("🔥 AGGRESSIVE MODE ENABLED - More trade opportunities!");
+        Print("⚠️ Risk Warning: Aggressive mode may increase drawdown");
+    }
+    
+    if(AllowMultiplePositions)
+    {
+        Print("📈 Multiple Positions Allowed - Max: ", MaxPositions);
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Calculate Adaptive Stop Loss Based on Market Conditions          |
+//+------------------------------------------------------------------+
+double CalculateAdaptiveSL(bool isBuy, double entryPrice)
+{
+    double atr = (ArraySize(atrBuffer) > 0) ? atrBuffer[0] : 1000 * _Point;
+    double volatility = CalculateVolatility();
+    
+    // Base multiplier adjusted by trading style
+    double baseMultiplier = ATR_Multiplier;
+    
+    switch(TradingStyle)
+    {
+        case STYLE_SCALPING:
+            baseMultiplier = 1.5;  // Tighter stops for scalping
+            break;
+        case STYLE_SWING:
+            baseMultiplier = 2.5;  // Medium stops for swing
+            break;
+        case STYLE_POSITION:
+            baseMultiplier = 4.0;  // Wider stops for position trading
+            break;
+    }
+    
+    // Adjust by volatility
+    double adaptiveMultiplier = baseMultiplier;
+    
+    if(volatility > 1.5)
+    {
+        // High volatility - need wider stops
+        adaptiveMultiplier *= 1.4;
+        Print("🌊 High Volatility Detected - Widening SL to ", DoubleToString(adaptiveMultiplier, 2), " ATR");
+    }
+    else if(volatility < 0.6)
+    {
+        // Low volatility - can use tighter stops
+        adaptiveMultiplier *= 0.8;
+        Print("😴 Low Volatility Detected - Tightening SL to ", DoubleToString(adaptiveMultiplier, 2), " ATR");
+    }
+    
+    // Calculate time of day factor (wider stops during volatile sessions)
+    MqlDateTime tm;
+    TimeToStruct(TimeCurrent(), tm);
+    int hour = tm.hour;
+    
+    // London/NY overlap (20:00-24:00 GMT+7) - most volatile
+    if(hour >= 20 && hour < 24)
+    {
+        adaptiveMultiplier *= 1.2;
+    }
+    // Asian session (01:00-10:00 GMT+7) - less volatile
+    else if(hour >= 1 && hour < 10)
+    {
+        adaptiveMultiplier *= 0.9;
+    }
+    
+    double slDistance = atr * adaptiveMultiplier;
+    
+    // Apply style-based min/max limits
+    double minSL = SL_MinDistance * _Point;
+    double maxSL = SL_MaxDistance * _Point;
+    
+    // Adjust limits based on style
+    if(TradingStyle == STYLE_SCALPING)
+    {
+        minSL = 200 * _Point;
+        maxSL = 1000 * _Point;
+    }
+    else if(TradingStyle == STYLE_POSITION)
+    {
+        minSL = 500 * _Point;
+        maxSL = 5000 * _Point;
+    }
+    
+    slDistance = MathMax(minSL, MathMin(maxSL, slDistance));
+    
+    Print("📏 Adaptive SL: ", DoubleToString(slDistance/_Point, 0), " points (", 
+          DoubleToString(adaptiveMultiplier, 2), " ATR)");
+    
+    return slDistance;
+}
+
+//+------------------------------------------------------------------+
+//| Cleanup Old Data                                                 |
+//+------------------------------------------------------------------+
+void CleanupOldData()
+{
+    datetime cutoffTime = TimeCurrent() - PeriodSeconds(PERIOD_CURRENT) * 200;
+    
+    // Clean up old FVGs
+    for(int i = fvgCount - 1; i >= 0; i--)
+    {
+        if(fvgList[i].time < cutoffTime || fvgList[i].isFilled)
+        {
+            // Remove graphical objects
+            string objName = "FVG_" + IntegerToString(i) + "_" + TimeToString(fvgList[i].time);
+            ObjectDelete(0, objName);
+            ObjectDelete(0, objName + "_Label");
+            
+            // Shift array
+            for(int j = i; j < fvgCount - 1; j++)
+                fvgList[j] = fvgList[j + 1];
+            fvgCount--;
+        }
+    }
+    
+    // Clean up old Order Blocks
+    for(int i = obCount - 1; i >= 0; i--)
+    {
+        if(obList[i].time < cutoffTime)
+        {
+            string objName = "OB_" + IntegerToString(i) + "_" + TimeToString(obList[i].time);
+            ObjectDelete(0, objName);
+            ObjectDelete(0, objName + "_Label");
+            
+            for(int j = i; j < obCount - 1; j++)
+                obList[j] = obList[j + 1];
+            obCount--;
+        }
+    }
+    
+    // Clean up old liquidity levels
+    for(int i = liquidityCount - 1; i >= 0; i--)
+    {
+        if(liquidityLevels[i].time < cutoffTime)
+        {
+            string objName = "LIQ_" + IntegerToString(i) + "_" + TimeToString(liquidityLevels[i].time);
+            ObjectDelete(0, objName);
+            ObjectDelete(0, objName + "_Label");
+            
+            for(int j = i; j < liquidityCount - 1; j++)
+                liquidityLevels[j] = liquidityLevels[j + 1];
+            liquidityCount--;
+        }
     }
 }
 //+------------------------------------------------------------------+
