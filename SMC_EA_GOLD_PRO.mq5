@@ -106,6 +106,18 @@ input int Dashboard_Y = 50;                 // Dashboard Y Position
 input color Dashboard_Color = clrWhite;     // Dashboard Text Color
 input int Dashboard_FontSize = 9;           // Dashboard Font Size
 
+input group "=== Alert Settings ==="
+input bool EnableAlerts = true;             // เปิดการแจ้งเตือนในเทอร์มินัล
+input bool EnablePushNotification = false;  // ส่งการแจ้งเตือนไปมือถือ
+input bool EnableEmailAlert = false;        // ส่งอีเมลแจ้งเตือน
+
+input group "=== Trading Days ==="
+input bool TradeOnMonday = true;            // เทรดวันจันทร์
+input bool TradeOnTuesday = true;           // เทรดวันอังคาร
+input bool TradeOnWednesday = true;         // เทรดวันพุธ
+input bool TradeOnThursday = true;          // เทรดวันพฤหัสบดี
+input bool TradeOnFriday = true;            // เทรดวันศุกร์
+
 // Global Variables Enhanced
 int obvHandle, atrHandle, volumeHandle, rsiHandle;
 double obvBuffer[], obvMABuffer[], atrBuffer[], volumeBuffer[], rsiBuffer[];
@@ -183,6 +195,19 @@ struct TradingStats {
 };
 
 TradingStats stats;
+
+// Signal Components Structure (used in GetEnhancedTradeSignal)
+struct SignalComponents {
+    bool obvSignal;
+    bool fvgSignal;
+    bool obSignal;
+    bool liquiditySignal;
+    bool bosSignal;
+    bool volumeSignal;
+    bool momentumSignal;
+    bool htfSignal;
+    bool sessionSignal;
+};
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -442,19 +467,7 @@ int GetEnhancedTradeSignal()
     double currentClose = iClose(_Symbol, PERIOD_CURRENT, 1);
     if(currentClose <= 0) return 0;
     
-    // Signal components
-    struct SignalComponents {
-        bool obvSignal;
-        bool fvgSignal;
-        bool obSignal;
-        bool liquiditySignal;
-        bool bosSignal;
-        bool volumeSignal;
-        bool momentumSignal;
-        bool htfSignal;
-        bool sessionSignal;
-    };
-    
+    // Initialize signal components
     SignalComponents bullish = {false}, bearish = {false};
     
     // 1. OBV Signal
@@ -1397,6 +1410,93 @@ int GetSweptLiquidityCount()
             count++;
     }
     return count;
+}
+
+//+------------------------------------------------------------------+
+//| Create Label for Dashboard                                       |
+//+------------------------------------------------------------------+
+void CreateLabel(string name, int x, int y, string text, int fontSize, color clr)
+{
+    ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+    ObjectSetString(0, name, OBJPROP_TEXT, text);
+    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSize);
+    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+}
+
+//+------------------------------------------------------------------+
+//| Count Open Positions by Type                                     |
+//+------------------------------------------------------------------+
+int CountOpenPositions(ENUM_POSITION_TYPE posType)
+{
+    int count = 0;
+    for(int i = 0; i < PositionsTotal(); i++)
+    {
+        if(PositionSelectByTicket(PositionGetTicket(i)))
+        {
+            if(PositionGetString(POSITION_SYMBOL) == _Symbol && 
+               PositionGetInteger(POSITION_TYPE) == posType)
+                count++;
+        }
+    }
+    return count;
+}
+
+//+------------------------------------------------------------------+
+//| Check for New Bar                                                |
+//+------------------------------------------------------------------+
+bool IsNewBar()
+{
+    datetime currentBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
+    if(currentBarTime != lastBarTime)
+    {
+        lastBarTime = currentBarTime;
+        return true;
+    }
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Cleanup Old Data                                                 |
+//+------------------------------------------------------------------+
+void CleanupOldData()
+{
+    datetime oldTime = TimeCurrent() - PeriodSeconds(PERIOD_CURRENT) * 500;
+    
+    // Clean up old FVG data
+    for(int i = fvgCount - 1; i >= 0; i--)
+    {
+        if(fvgList[i].time < oldTime || fvgList[i].isFilled)
+        {
+            string objName = "FVG_" + IntegerToString(i) + "_" + TimeToString(fvgList[i].time);
+            ObjectDelete(0, objName);
+            ObjectDelete(0, objName + "_Label");
+        }
+    }
+    
+    // Clean up old OB data
+    for(int i = obCount - 1; i >= 0; i--)
+    {
+        if(obList[i].time < oldTime)
+        {
+            string objName = "OB_" + IntegerToString(i) + "_" + TimeToString(obList[i].time);
+            ObjectDelete(0, objName);
+            ObjectDelete(0, objName + "_Label");
+        }
+    }
+    
+    // Clean up old liquidity data
+    for(int i = liquidityCount - 1; i >= 0; i--)
+    {
+        if(liquidityLevels[i].time < oldTime)
+        {
+            string objName = "LIQ_" + IntegerToString(i) + "_" + TimeToString(liquidityLevels[i].time);
+            ObjectDelete(0, objName);
+            ObjectDelete(0, objName + "_Label");
+        }
+    }
 }
 
 //+------------------------------------------------------------------+
