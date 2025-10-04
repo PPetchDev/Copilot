@@ -167,6 +167,18 @@ struct MarketStructure {
     double strength;
 };
 
+struct SignalComponents {
+    bool obvSignal;
+    bool fvgSignal;
+    bool obSignal;
+    bool liquiditySignal;
+    bool bosSignal;
+    bool volumeSignal;
+    bool momentumSignal;
+    bool htfSignal;
+    bool sessionSignal;
+};
+
 // Arrays
 FVGStruct fvgList[];
 int fvgCount = 0;
@@ -453,19 +465,6 @@ int GetEnhancedTradeSignal()
     
     double currentClose = iClose(_Symbol, PERIOD_CURRENT, 1);
     if(currentClose <= 0) return 0;
-    
-    // Signal components
-    struct SignalComponents {
-        bool obvSignal;
-        bool fvgSignal;
-        bool obSignal;
-        bool liquiditySignal;
-        bool bosSignal;
-        bool volumeSignal;
-        bool momentumSignal;
-        bool htfSignal;
-        bool sessionSignal;
-    };
     
     SignalComponents bullish = {false}, bearish = {false};
     
@@ -2173,7 +2172,7 @@ bool IsTradeAllowed()
     
     // Connection check
     bool connectionOK = TerminalInfoInteger(TERMINAL_CONNECTED) && 
-                       !TerminalInfoInteger(TERMINAL_TRADE_ALLOWED);
+                       TerminalInfoInteger(TERMINAL_TRADE_ALLOWED);
     
     if(!dayAllowed)
         Print("❌ Trading not allowed today");
