@@ -7,6 +7,14 @@
 #property version   "3.00"
 #property strict
 
+// Stop Loss Modes
+enum ENUM_SL_MODE {
+    SL_FIXED,           // ระยะคงที่
+    SL_ATR,             // ตาม ATR
+    SL_SWING,           // ตาม Swing High/Low
+    SL_SMART            // Smart SL (รวมหลายวิธี)
+};
+
 // Input Parameters
 input group "=== Risk Management Enhanced ==="
 input double LotSize = 0.01;                // ขนาด Lot
@@ -27,14 +35,6 @@ input double BreakEvenProfit = 100;         // BE Profit (points)
 input bool UsePartialClose = true;          // ใช้ Partial Close
 input double PartialClose_ATR = 1.5;        // Partial Close Trigger (ATR)
 input double PartialClose_Percent = 50.0;   // % ที่จะปิด
-
-// Stop Loss Modes
-enum ENUM_SL_MODE {
-    SL_FIXED,           // ระยะคงที่
-    SL_ATR,             // ตาม ATR
-    SL_SWING,           // ตาม Swing High/Low
-    SL_SMART            // Smart SL (รวมหลายวิธี)
-};
 
 input group "=== OBV Settings Enhanced ==="
 input int OBV_Period = 20;                  // OBV MA Period
@@ -153,6 +153,19 @@ struct MarketStructure {
     bool isHigh;
     bool isBroken;
     double strength;
+};
+
+// Signal Components Structure
+struct SignalComponents {
+    bool obvSignal;
+    bool fvgSignal;
+    bool obSignal;
+    bool liquiditySignal;
+    bool bosSignal;
+    bool volumeSignal;
+    bool momentumSignal;
+    bool htfSignal;
+    bool sessionSignal;
 };
 
 // Arrays
@@ -441,19 +454,6 @@ int GetEnhancedTradeSignal()
     
     double currentClose = iClose(_Symbol, PERIOD_CURRENT, 1);
     if(currentClose <= 0) return 0;
-    
-    // Signal components
-    struct SignalComponents {
-        bool obvSignal;
-        bool fvgSignal;
-        bool obSignal;
-        bool liquiditySignal;
-        bool bosSignal;
-        bool volumeSignal;
-        bool momentumSignal;
-        bool htfSignal;
-        bool sessionSignal;
-    };
     
     SignalComponents bullish = {false}, bearish = {false};
     
@@ -1397,6 +1397,102 @@ int GetSweptLiquidityCount()
             count++;
     }
     return count;
+}
+
+//+------------------------------------------------------------------+
+//| Check if there is a new bar                                      |
+//+------------------------------------------------------------------+
+bool IsNewBar()
+{
+    datetime currentTime = iTime(_Symbol, PERIOD_CURRENT, 0);
+    if(currentTime != lastBarTime)
+    {
+        lastBarTime = currentTime;
+        return true;
+    }
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Cleanup old FVG, OB, and Liquidity data                         |
+//+------------------------------------------------------------------+
+void CleanupOldData()
+{
+    datetime currentTime = TimeCurrent();
+    int maxBars = 500; // Keep data for last 500 bars
+    
+    // Cleanup old FVGs
+    for(int i = fvgCount - 1; i >= 0; i--)
+    {
+        if(fvgList[i].isFilled || (currentTime - fvgList[i].time) > maxBars * PeriodSeconds(PERIOD_CURRENT))
+        {
+            // Remove old/filled FVG
+            for(int j = i; j < fvgCount - 1; j++)
+                fvgList[j] = fvgList[j + 1];
+            fvgCount--;
+        }
+    }
+    
+    // Cleanup old Order Blocks
+    for(int i = obCount - 1; i >= 0; i--)
+    {
+        if(obList[i].isFilled || (currentTime - obList[i].time) > maxBars * PeriodSeconds(PERIOD_CURRENT))
+        {
+            // Remove old/filled OB
+            for(int j = i; j < obCount - 1; j++)
+                obList[j] = obList[j + 1];
+            obCount--;
+        }
+    }
+    
+    // Cleanup old Liquidity levels
+    for(int i = liquidityCount - 1; i >= 0; i--)
+    {
+        if(liquidityLevels[i].isSwept || (currentTime - liquidityLevels[i].time) > maxBars * PeriodSeconds(PERIOD_CURRENT))
+        {
+            // Remove old/swept liquidity
+            for(int j = i; j < liquidityCount - 1; j++)
+                liquidityLevels[j] = liquidityLevels[j + 1];
+            liquidityCount--;
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| Count open positions by type                                     |
+//+------------------------------------------------------------------+
+int CountOpenPositions(ENUM_POSITION_TYPE posType)
+{
+    int count = 0;
+    for(int i = 0; i < PositionsTotal(); i++)
+    {
+        if(PositionSelectByTicket(PositionGetTicket(i)))
+        {
+            if(PositionGetString(POSITION_SYMBOL) == _Symbol && 
+               PositionGetInteger(POSITION_TYPE) == posType)
+            {
+                count++;
+            }
+        }
+    }
+    return count;
+}
+
+//+------------------------------------------------------------------+
+//| Create Label on Chart                                            |
+//+------------------------------------------------------------------+
+void CreateLabel(string name, int x, int y, string text, int fontSize, color clr)
+{
+    if(ObjectFind(0, name) >= 0)
+        ObjectDelete(0, name);
+    
+    ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+    ObjectSetString(0, name, OBJPROP_TEXT, text);
+    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSize);
+    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
 }
 
 //+------------------------------------------------------------------+
