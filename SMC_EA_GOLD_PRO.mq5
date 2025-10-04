@@ -98,6 +98,18 @@ input int MomentumPeriod = 14;              // Momentum Period
 input bool UseConfluenceFilter = true;      // ใช้ Confluence Filter
 input int MinConfluenceSignals = 3;         // สัญญาณขั้นต่ำที่ต้องมาบรรจบ
 
+input group "=== Trading Days ==="
+input bool TradeOnMonday = true;            // เทรดวันจันทร์
+input bool TradeOnTuesday = true;           // เทรดวันอังคาร
+input bool TradeOnWednesday = true;         // เทรดวันพุธ
+input bool TradeOnThursday = true;          // เทรดวันพฤหัสบดี
+input bool TradeOnFriday = true;            // เทรดวันศุกร์
+
+input group "=== Alert Settings ==="
+input bool EnableAlerts = true;             // เปิดใช้งาน Alert
+input bool EnablePushNotification = false;  // ส่ง Push Notification
+input bool EnableEmailAlert = false;        // ส่ง Email Alert
+
 input group "=== Dashboard Settings Enhanced ==="
 input bool ShowDashboard = true;            // แสดง Dashboard
 input bool ShowDetailedInfo = true;         // แสดงข้อมูลละเอียด
@@ -2211,6 +2223,99 @@ void OnDeinit(const int reason)
         Print("Max Drawdown: ", DoubleToString(stats.maxDrawdown, 2), "%");
     }
     Print("═══════════════════════════════════════");
+}
+
+//+------------------------------------------------------------------+
+//| Create Label for Dashboard                                       |
+//+------------------------------------------------------------------+
+void CreateLabel(string name, int x, int y, string text, int fontSize, color clr)
+{
+    ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+    ObjectSetInteger(0, name, OBJPROP_ANCHOR, ANCHOR_LEFT_UPPER);
+    ObjectSetString(0, name, OBJPROP_TEXT, text);
+    ObjectSetString(0, name, OBJPROP_FONT, "Arial");
+    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSize);
+    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+}
+
+//+------------------------------------------------------------------+
+//| Count Open Positions by Type                                     |
+//+------------------------------------------------------------------+
+int CountOpenPositions(ENUM_POSITION_TYPE posType)
+{
+    int count = 0;
+    for(int i = 0; i < PositionsTotal(); i++)
+    {
+        if(PositionSelectByTicket(PositionGetTicket(i)))
+        {
+            if(PositionGetString(POSITION_SYMBOL) == _Symbol &&
+               PositionGetInteger(POSITION_TYPE) == posType)
+            {
+                count++;
+            }
+        }
+    }
+    return count;
+}
+
+//+------------------------------------------------------------------+
+//| Check for New Bar                                                |
+//+------------------------------------------------------------------+
+bool IsNewBar()
+{
+    datetime currentBarTime = iTime(_Symbol, PERIOD_CURRENT, 0);
+    if(currentBarTime != lastBarTime)
+    {
+        lastBarTime = currentBarTime;
+        return true;
+    }
+    return false;
+}
+
+//+------------------------------------------------------------------+
+//| Cleanup Old Data                                                 |
+//+------------------------------------------------------------------+
+void CleanupOldData()
+{
+    datetime oldTime = TimeCurrent() - PeriodSeconds(PERIOD_CURRENT) * 500;
+    
+    // Cleanup old FVG
+    for(int i = 0; i < fvgCount; i++)
+    {
+        if(fvgList[i].time < oldTime && fvgList[i].isFilled)
+        {
+            fvgList[i].isValid = false;
+            string objName = "FVG_" + IntegerToString(i) + "_" + TimeToString(fvgList[i].time);
+            ObjectDelete(0, objName);
+            ObjectDelete(0, objName + "_Label");
+        }
+    }
+    
+    // Cleanup old Order Blocks
+    for(int i = 0; i < obCount; i++)
+    {
+        if(obList[i].time < oldTime)
+        {
+            obList[i].isValid = false;
+            string objName = "OB_" + IntegerToString(i) + "_" + TimeToString(obList[i].time);
+            ObjectDelete(0, objName);
+            ObjectDelete(0, objName + "_Label");
+        }
+    }
+    
+    // Cleanup old Liquidity Levels
+    for(int i = 0; i < liquidityCount; i++)
+    {
+        if(liquidityLevels[i].time < oldTime && liquidityLevels[i].isSwept)
+        {
+            string objName = "LIQ_" + IntegerToString(i) + "_" + TimeToString(liquidityLevels[i].time);
+            ObjectDelete(0, objName);
+            ObjectDelete(0, objName + "_Label");
+        }
+    }
 }
 
 //+------------------------------------------------------------------+
