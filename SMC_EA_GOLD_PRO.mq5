@@ -7,6 +7,14 @@
 #property version   "3.00"
 #property strict
 
+// Stop Loss Modes
+enum ENUM_SL_MODE {
+    SL_FIXED,           // ระยะคงที่
+    SL_ATR,             // ตาม ATR
+    SL_SWING,           // ตาม Swing High/Low
+    SL_SMART            // Smart SL (รวมหลายวิธี)
+};
+
 // Input Parameters
 input group "=== Risk Management Enhanced ==="
 input double LotSize = 0.01;                // ขนาด Lot
@@ -27,14 +35,6 @@ input double BreakEvenProfit = 100;         // BE Profit (points)
 input bool UsePartialClose = true;          // ใช้ Partial Close
 input double PartialClose_ATR = 1.5;        // Partial Close Trigger (ATR)
 input double PartialClose_Percent = 50.0;   // % ที่จะปิด
-
-// Stop Loss Modes
-enum ENUM_SL_MODE {
-    SL_FIXED,           // ระยะคงที่
-    SL_ATR,             // ตาม ATR
-    SL_SWING,           // ตาม Swing High/Low
-    SL_SMART            // Smart SL (รวมหลายวิธี)
-};
 
 input group "=== OBV Settings Enhanced ==="
 input int OBV_Period = 20;                  // OBV MA Period
